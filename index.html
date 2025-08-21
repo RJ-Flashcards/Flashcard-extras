@@ -8,6 +8,15 @@
   <!-- Styles -->
   <link rel="stylesheet" href="style.css" />
 
+  <!-- Tiny inline styles for the new controls (keeps it simple) -->
+  <style>
+    .study-controls { display:flex; flex-direction:column; gap:8px; align-items:center; margin-top:10px; }
+    .study-controls .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:center; }
+    .study-controls button, .study-controls select {
+      padding:10px 14px; border-radius:12px; border:1px solid #ccc; font-size:16px; cursor:pointer;
+    }
+  </style>
+
   <!-- Browser tab favicon (optional but nice) -->
   <link rel="icon" href="logo.png" type="image/png">
 
@@ -35,6 +44,30 @@
   <div class="buttons">
     <button id="prevBtn">Back</button>
     <button id="nextBtn">Next</button>
+  </div>
+
+  <!-- NEW: Shuffle + Save UI -->
+  <div class="study-controls">
+    <div class="row">
+      <button id="shuffleBtn" title="Shuffle order">🔀 Shuffle</button>
+
+      <label for="modeSelect">Study set:</label>
+      <select id="modeSelect">
+        <option value="all">All</option>
+        <option value="unknown">Unknown</option>
+        <option value="soso">So‑So</option>
+        <option value="known">Known</option>
+      </select>
+
+      <button id="resetProgressBtn" title="Clear saved progress (this Day only)">Reset Progress</button>
+    </div>
+
+    <div class="row">
+      <span>Rate this card:</span>
+      <button id="rateUnknown"  title="I didn’t know it">❌ Unknown</button>
+      <button id="rateSoSo"     title="So‑So">😐 So‑So</button>
+      <button id="rateKnown"    title="I knew it">✅ Known</button>
+    </div>
   </div>
   
   <img id="logo" src="logo.png" alt="Logo">
@@ -75,9 +108,8 @@
       "A-Z Word Bank": "244262932",
       "Everyday Phrasal Verbs": "104187808",
       "Business Phrasal Verbs": "887218085",
-      "Proverbs": "1337097424"   // <-- your renamed tab
+      "Proverbs": "1337097424"
     };
-
 
     // 2) Grab your UI elements
     const dropdown  = document.getElementById("daySelector");
@@ -88,7 +120,17 @@
     const prevBtn   = document.getElementById("prevBtn");
     const nextBtn   = document.getElementById("nextBtn");
 
-    let cards = [], currentIndex = 0, isFlipped = false;
+    // NEW controls
+    const shuffleBtn = document.getElementById('shuffleBtn');
+    const modeSelect = document.getElementById('modeSelect');
+    const resetBtn   = document.getElementById('resetProgressBtn');
+    const rateUnknownBtn = document.getElementById('rateUnknown');
+    const rateSoSoBtn    = document.getElementById('rateSoSo');
+    const rateKnownBtn   = document.getElementById('rateKnown');
+
+    let cards = [];            // array of [word, definition]
+    let currentIndex = 0;      // index into viewIndexes (NOT directly into cards)
+    let isFlipped = false;
 
     // 3) Populate the dropdown
     for (const name in sheetGIDs) {
@@ -98,72 +140,57 @@
       dropdown.appendChild(opt);
     }
 
-    // 4) Event handlers
-    dropdown.addEventListener("change", () => loadCSV(sheetGIDs[dropdown.value]));
+    // --- EXISTING flip behavior: flip only on card tap ---
     flashcard.addEventListener("click", e => {
       if (!e.target.closest("button")) {
         isFlipped = !isFlipped;
         cardInner.classList.toggle("flipped", isFlipped);
       }
     });
-    nextBtn.addEventListener("click", e => {
-      e.stopPropagation();
-      currentIndex = (currentIndex + 1) % cards.length;
-      displayCard();
-    });
-    prevBtn.addEventListener("click", e => {
-      e.stopPropagation();
-      currentIndex = (currentIndex - 1 + cards.length) % cards.length;
-      displayCard();
-    });
 
-    // 5) Loader: inject gid, request TSV
-function loadCSV(gid) {
-  // ← paste your simplified base URL here:
-  const base = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSCwWYlYusnhnQlna1pIsMMzbzYd7dETtyI-pXgGrRxOeaor7AEoRX234MFCq1aWCsMXDf3K5U0cRpl/pub";
-  const url  = `${base}?gid=${gid}&single=true&output=csv`;
-
-  fetch(url)
-    .then(res => res.text())
-    .then(csv => {
-      cards = csv
-        .trim()
-        .split("\n")
-        .slice(1)
-        .map(line => {
-          const [word, def] = line.split(",");
-          return word && def ? [word.trim(), def.trim()] : null;
-        })
-        .filter(Boolean);
-
-      currentIndex = 0;
-      isFlipped = false;
-      if (cards.length) displayCard();
-      else {
-        front.textContent = "No data available.";
-        back.textContent  = "";
-        cardInner.classList.remove("flipped");
-      }
-    })
-    .catch(_ => {
-      front.textContent = "Error loading data.";
-      back.textContent  = "";
-      cardInner.classList.remove("flipped");
-    });
-}
-
-
-    // 6) Render the current card
-    function displayCard() {
-      const [word, definition] = cards[currentIndex];
-      front.textContent = word;
-      back.textContent  = definition;
-      cardInner.classList.toggle("flipped", isFlipped);
+    // ------------------------------------------------------------------
+    // NEW: Shuffle + Save (Know/So‑So/Unknown) with filtering
+    // ------------------------------------------------------------------
+    // Storage (per Day)
+    const STORAGE_KEY = 'flashcards_progress_v2';
+    function deckKey() {
+      const sel = document.getElementById('daySelector');
+      return sel && sel.value ? `deck_${sel.value}` : 'deck_Default';
+    }
+    function cardIdFromPair(pair) {
+      // pair is [word, def]
+      return `${pair[0] || ''}||${pair[1] || ''}`;
+    }
+    function loadAll() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch { return {}; } }
+    function saveAll(data) { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
+    function getStateByPair(pair) {
+      const all = loadAll(); const dk = deckKey();
+      const id = cardIdFromPair(pair);
+      return (all[dk] && all[dk][id]) || { rating: 'unknown', last: 0 };
+    }
+    function setStateByPair(pair, patch) {
+      const all = loadAll(); const dk = deckKey();
+      const id = cardIdFromPair(pair);
+      all[dk] = all[dk] || {};
+      const prior = getStateByPair(pair);
+      all[dk][id] = { ...prior, ...patch, ts: Date.now() };
+      saveAll(all);
+    }
+    function resetDeck() {
+      const all = loadAll(); const dk = deckKey();
+      delete all[dk]; saveAll(all);
     }
 
-    // 7) Initialize on load
-    dropdown.value = "Day 1";
-    loadCSV(sheetGIDs["Day 1"]);
-  </script>
-</body>
-</html>
+    // View indexes & shuffle
+    let viewIndexes = [];
+    let shuffleOn = false;
+
+    function filteredIndexes(mode) {
+      if (!Array.isArray(cards)) return [];
+      return cards.reduce((acc, pair, i) => {
+        const st = getStateByPair(pair);
+        if (mode === 'all') acc.push(i);
+        else if (mode === 'unknown' && st.rating === 'unknown') acc.push(i);
+        else if (mode === 'soso'    && st.rating === 'soso')    acc.push(i);
+        else if (mode === 'known'   && st.rating === 'known')   acc.push(i);
+        return acc;
