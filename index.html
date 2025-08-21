@@ -5,10 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Flashcard App - Multi Day</title>
 
-  <!-- Styles -->
   <link rel="stylesheet" href="style.css" />
 
-  <!-- Tiny inline styles for the new controls (keeps it simple) -->
+  <!-- Tiny inline styles for new controls -->
   <style>
     .study-controls { display:flex; flex-direction:column; gap:8px; align-items:center; margin-top:10px; }
     .study-controls .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:center; }
@@ -17,13 +16,8 @@
     }
   </style>
 
-  <!-- Browser tab favicon (optional but nice) -->
   <link rel="icon" href="logo.png" type="image/png">
-
-  <!-- iOS/iPadOS home-screen icon -->
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
-
-  <!-- Web App Manifest (Android/Chrome, etc.) -->
   <link rel="manifest" href="manifest.webmanifest">
   <meta name="theme-color" content="#0b57d0">
 </head>
@@ -36,7 +30,7 @@
 
   <div class="flashcard" id="flashcard">
     <div class="flashcard-inner" id="flashcardInner">
-      <div class="flashcard-front" id="cardFront"></div>
+      <div class="flashcard-front" id="cardFront">Loading…</div>
       <div class="flashcard-back" id="cardBack"></div>
     </div>
   </div>
@@ -46,7 +40,7 @@
     <button id="nextBtn">Next</button>
   </div>
 
-  <!-- NEW: Shuffle + Save UI -->
+  <!-- Shuffle + Save UI -->
   <div class="study-controls">
     <div class="row">
       <button id="shuffleBtn" title="Shuffle order">🔀 Shuffle</button>
@@ -55,7 +49,7 @@
       <select id="modeSelect">
         <option value="all">All</option>
         <option value="unknown">Unknown</option>
-        <option value="soso">So‑So</option>
+        <option value="soso">So-So</option>
         <option value="known">Known</option>
       </select>
 
@@ -65,14 +59,15 @@
     <div class="row">
       <span>Rate this card:</span>
       <button id="rateUnknown"  title="I didn’t know it">❌ Unknown</button>
-      <button id="rateSoSo"     title="So‑So">😐 So‑So</button>
+      <button id="rateSoSo"     title="So-So">😐 So-So</button>
       <button id="rateKnown"    title="I knew it">✅ Known</button>
     </div>
   </div>
-  
+
   <img id="logo" src="logo.png" alt="Logo">
 
   <script>
+  window.addEventListener('DOMContentLoaded', () => {
     // 1) Map tab names to their GIDs
     const sheetGIDs = {
       "Day 1": "0",
@@ -111,7 +106,7 @@
       "Proverbs": "1337097424"
     };
 
-    // 2) Grab your UI elements
+    // 2) Grab UI
     const dropdown  = document.getElementById("daySelector");
     const flashcard = document.getElementById("flashcard");
     const cardInner = document.getElementById("flashcardInner");
@@ -120,7 +115,6 @@
     const prevBtn   = document.getElementById("prevBtn");
     const nextBtn   = document.getElementById("nextBtn");
 
-    // NEW controls
     const shuffleBtn = document.getElementById('shuffleBtn');
     const modeSelect = document.getElementById('modeSelect');
     const resetBtn   = document.getElementById('resetProgressBtn');
@@ -128,11 +122,11 @@
     const rateSoSoBtn    = document.getElementById('rateSoSo');
     const rateKnownBtn   = document.getElementById('rateKnown');
 
-    let cards = [];            // array of [word, definition]
-    let currentIndex = 0;      // index into viewIndexes (NOT directly into cards)
+    let cards = [];           // array of [word, definition]
+    let currentIndex = 0;     // index into viewIndexes
     let isFlipped = false;
 
-    // 3) Populate the dropdown
+    // 3) Populate Day dropdown
     for (const name in sheetGIDs) {
       const opt = document.createElement("option");
       opt.value = name;
@@ -140,55 +134,41 @@
       dropdown.appendChild(opt);
     }
 
-    // --- EXISTING flip behavior: flip only on card tap ---
-    flashcard.addEventListener("click", e => {
+    // Flip only on card tap
+    flashcard.addEventListener("click", (e) => {
       if (!e.target.closest("button")) {
         isFlipped = !isFlipped;
         cardInner.classList.toggle("flipped", isFlipped);
       }
     });
 
-    // ------------------------------------------------------------------
-    // NEW: Shuffle + Save (Know/So‑So/Unknown) with filtering
-    // ------------------------------------------------------------------
-    // Storage (per Day)
+    // 4) Progress storage (per Day)
     const STORAGE_KEY = 'flashcards_progress_v2';
-    function deckKey() {
-      const sel = document.getElementById('daySelector');
-      return sel && sel.value ? `deck_${sel.value}` : 'deck_Default';
-    }
-    function cardIdFromPair(pair) {
-      // pair is [word, def]
-      return `${pair[0] || ''}||${pair[1] || ''}`;
-    }
-    function loadAll() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch { return {}; } }
-    function saveAll(data) { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
-    function getStateByPair(pair) {
-      const all = loadAll(); const dk = deckKey();
-      const id = cardIdFromPair(pair);
-      return (all[dk] && all[dk][id]) || { rating: 'unknown', last: 0 };
-    }
-    function setStateByPair(pair, patch) {
-      const all = loadAll(); const dk = deckKey();
-      const id = cardIdFromPair(pair);
+    const deckKey = () => `deck_${dropdown.value || 'Default'}`;
+    const cardId = (pair) => `${pair[0] || ''}||${pair[1] || ''}`;
+    const loadAll = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch { return {}; } };
+    const saveAll = (data) => localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    const getState = (pair) => {
+      const all = loadAll(); const dk = deckKey(); const id = cardId(pair);
+      return (all[dk] && all[dk][id]) || { rating:'unknown', last:0 };
+    };
+    const setState = (pair, patch) => {
+      const all = loadAll(); const dk = deckKey(); const id = cardId(pair);
       all[dk] = all[dk] || {};
-      const prior = getStateByPair(pair);
+      const prior = getState(pair);
       all[dk][id] = { ...prior, ...patch, ts: Date.now() };
       saveAll(all);
-    }
-    function resetDeck() {
-      const all = loadAll(); const dk = deckKey();
-      delete all[dk]; saveAll(all);
-    }
+    };
+    const resetDeck = () => { const all = loadAll(); delete all[deckKey()]; saveAll(all); };
 
-    // View indexes & shuffle
+    // 5) Filter + Shuffle view
     let viewIndexes = [];
     let shuffleOn = false;
 
     function filteredIndexes(mode) {
       if (!Array.isArray(cards)) return [];
-      return cards.reduce((acc, pair, i) => {
-        const st = getStateByPair(pair);
+      return cards.reduce((acc, p, i) => {
+        const st = getState(p);
         if (mode === 'all') acc.push(i);
         else if (mode === 'unknown' && st.rating === 'unknown') acc.push(i);
         else if (mode === 'soso'    && st.rating === 'soso')    acc.push(i);
@@ -207,7 +187,6 @@
 
     function rebuildView(preserveCurrent = false) {
       const mode = modeSelect.value;
-      // Try to remember the current card (if possible)
       const prevPair = cards[viewIndexes[currentIndex] ?? 0];
 
       viewIndexes = filteredIndexes(mode);
@@ -215,8 +194,8 @@
       if (shuffleOn) shuffleArray(viewIndexes);
 
       if (preserveCurrent && prevPair) {
-        const targetId = cardIdFromPair(prevPair);
-        const found = viewIndexes.findIndex(i => cardIdFromPair(cards[i]) === targetId);
+        const target = cardId(prevPair);
+        const found = viewIndexes.findIndex(i => cardId(cards[i]) === target);
         currentIndex = found >= 0 ? found : 0;
       } else {
         currentIndex = 0;
@@ -227,26 +206,31 @@
     function renderCurrent() {
       if (!viewIndexes.length || !cards.length) {
         front.textContent = "No data available.";
-        back.textContent  = "";
+        back.textContent = "";
         cardInner.classList.remove("flipped");
         return;
       }
       const idx = viewIndexes[currentIndex] ?? 0;
-      const pair = cards[idx]; // [word, definition]
-      displayCardFromPair(pair);
+      const pair = cards[idx];
+      front.textContent = pair[0] || "";
+      back.textContent  = pair[1] || "";
+      cardInner.classList.toggle("flipped", isFlipped);
     }
 
-    // Ratings
-    function rate(outcome) {
-      const idx = viewIndexes[currentIndex] ?? 0;
-      const pair = cards[idx];
-      setStateByPair(pair, { rating: outcome, last: Date.now() });
-      // advance automatically to keep flow
+    // 6) Wire controls
+    nextBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (!viewIndexes.length) return;
       currentIndex = (currentIndex + 1) % viewIndexes.length;
       renderCurrent();
-    }
+    });
+    prevBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (!viewIndexes.length) return;
+      currentIndex = (currentIndex - 1 + viewIndexes.length) % viewIndexes.length;
+      renderCurrent();
+    });
 
-    // Wire new controls (and ensure clicks don’t flip the card)
     shuffleBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       shuffleOn = !shuffleOn;
@@ -261,50 +245,60 @@
       if (confirm('Clear saved ratings for this Day?')) { resetDeck(); rebuildView(false); }
     });
 
+    const rate = (outcome) => {
+      const idx = viewIndexes[currentIndex] ?? 0;
+      const pair = cards[idx];
+      setState(pair, { rating: outcome, last: Date.now() });
+      currentIndex = (currentIndex + 1) % viewIndexes.length;
+      renderCurrent();
+    };
     rateUnknownBtn.addEventListener('click', (e)=>{ e.stopPropagation(); rate('unknown'); });
     rateSoSoBtn.addEventListener('click',    (e)=>{ e.stopPropagation(); rate('soso'); });
     rateKnownBtn.addEventListener('click',   (e)=>{ e.stopPropagation(); rate('known'); });
 
-    // 4) Next/Prev now use the filtered/shuffled view
-    nextBtn.addEventListener("click", e => {
-      e.stopPropagation();
-      if (!viewIndexes.length) return;
-      currentIndex = (currentIndex + 1) % viewIndexes.length;
-      renderCurrent();
-    });
-    prevBtn.addEventListener("click", e => {
-      e.stopPropagation();
-      if (!viewIndexes.length) return;
-      currentIndex = (currentIndex - 1 + viewIndexes.length) % viewIndexes.length;
-      renderCurrent();
-    });
+    // 7) Loader (tries TSV first; falls back to CSV)
+    function parseRows(text) {
+      const rows = text.trim().split(/\r?\n/);
+      if (rows.length <= 1) return [];
+      const header = rows[0];
+      const useTab = header.includes('\t');
+      const out = [];
+      for (let i = 1; i < rows.length; i++) {
+        const line = rows[i];
+        if (!line) continue;
+        if (useTab) {
+          const parts = line.split('\t');
+          const word = (parts[0] || '').trim();
+          const def  = (parts[1] || '').trim();
+          if (word && def) out.push([word, def]);
+        } else {
+          // CSV fallback: split once on first comma
+          const j = line.indexOf(',');
+          const word = j >= 0 ? line.slice(0, j).trim() : '';
+          const def  = j >= 0 ? line.slice(j + 1).trim() : '';
+          if (word && def) out.push([word, def]);
+        }
+      }
+      return out;
+    }
 
-    // 5) Loader: inject gid, request CSV (kept as you had it)
     function loadCSV(gid) {
+      // Prefer TSV to avoid comma problems in definitions
       const base = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRKN-660hGCgBRC3GYRHt-_Uq02JB6PJV4s29GIGOs1njgrjAHGGw01lgUFWd1xBQ73e0ZSJzdlb9mi/pub";
-      const url  = `${base}?gid=${gid}&single=true&output=csv`;
+      const urlTSV = `${base}?gid=${gid}&single=true&output=tsv`;
+      const urlCSV = `${base}?gid=${gid}&single=true&output=csv`;
 
-      fetch(url)
-        .then(res => res.text())
-        .then(csv => {
-          cards = csv
-            .trim()
-            .split("\n")
-            .slice(1)
-            .map(line => {
-              const [word, def] = line.split(",");
-              return (word && def) ? [word.trim(), def.trim()] : null;
-            })
-            .filter(Boolean);
-
+      fetch(urlTSV)
+        .then(r => r.ok ? r.text() : Promise.reject())
+        .catch(() => fetch(urlCSV).then(r => r.text()))
+        .then(text => {
+          cards = parseRows(text);
           isFlipped = false;
           cardInner.classList.remove("flipped");
-
-          // Instead of directly calling displayCard(), rebuild the view
-          // so filters + shuffle + ratings all take effect.
           rebuildView(false);
         })
-        .catch(_ => {
+        .catch(err => {
+          console.error('Load error:', err);
           front.textContent = "Error loading data.";
           back.textContent  = "";
           cardInner.classList.remove("flipped");
@@ -312,20 +306,13 @@
         });
     }
 
-    // 6) Render helper (uses your existing display semantics)
-    function displayCardFromPair(pair) {
-      const [word, definition] = pair || ["", ""];
-      front.textContent = word;
-      back.textContent  = definition;
-      cardInner.classList.toggle("flipped", isFlipped);
-    }
-
-    // 7) Day selector
+    // 8) Day selector
     dropdown.addEventListener("change", () => loadCSV(sheetGIDs[dropdown.value]));
 
-    // 8) Initialize on load
+    // 9) Initialize
     dropdown.value = "Day 1";
     loadCSV(sheetGIDs["Day 1"]);
+  });
   </script>
 </body>
 </html>
