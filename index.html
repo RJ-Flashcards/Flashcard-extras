@@ -7,7 +7,7 @@
 
   <link rel="stylesheet" href="style.css" />
 
-  <!-- Tiny inline styles for new controls -->
+  <!-- Tiny inline styles for the study controls -->
   <style>
     .study-controls { display:flex; flex-direction:column; gap:8px; align-items:center; margin-top:10px; }
     .study-controls .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:center; }
@@ -48,9 +48,8 @@
       <label for="modeSelect">Study set:</label>
       <select id="modeSelect">
         <option value="all">All</option>
-        <option value="unknown">Unknown</option>
-        <option value="soso">So-So</option>
-        <option value="known">Known</option>
+        <option value="review">To Review</option>
+        <option value="learned">Learned</option>
       </select>
 
       <button id="resetProgressBtn" title="Clear saved progress (this Day only)">Reset Progress</button>
@@ -58,9 +57,8 @@
 
     <div class="row">
       <span>Rate this card:</span>
-      <button id="rateUnknown"  title="I didn’t know it">❌ Unknown</button>
-      <button id="rateSoSo"     title="So-So">😐 So-So</button>
-      <button id="rateKnown"    title="I knew it">✅ Known</button>
+      <button id="rateReview"  title="Needs review">❌ To Review</button>
+      <button id="rateLearned" title="I learned it">✅ Learned</button>
     </div>
   </div>
 
@@ -118,9 +116,8 @@
     const shuffleBtn = document.getElementById('shuffleBtn');
     const modeSelect = document.getElementById('modeSelect');
     const resetBtn   = document.getElementById('resetProgressBtn');
-    const rateUnknownBtn = document.getElementById('rateUnknown');
-    const rateSoSoBtn    = document.getElementById('rateSoSo');
-    const rateKnownBtn   = document.getElementById('rateKnown');
+    const rateReviewBtn  = document.getElementById('rateReview');
+    const rateLearnedBtn = document.getElementById('rateLearned');
 
     let cards = [];           // array of [word, definition]
     let currentIndex = 0;     // index into viewIndexes
@@ -142,15 +139,32 @@
       }
     });
 
-    // 4) Progress storage (per Day)
+    // 4) Progress storage (per Day) + migration
     const STORAGE_KEY = 'flashcards_progress_v2';
     const deckKey = () => `deck_${dropdown.value || 'Default'}`;
     const cardId = (pair) => `${pair[0] || ''}||${pair[1] || ''}`;
     const loadAll = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch { return {}; } };
     const saveAll = (data) => localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+
+    // Migrate old ratings: 'unknown','soso','known' -> 'review','review','learned'
+    (function migrate(){
+      const all = loadAll();
+      let changed = false;
+      for (const dk in all) {
+        for (const id in all[dk]) {
+          const st = all[dk][id];
+          if (st && st.rating) {
+            if (st.rating === 'unknown' || st.rating === 'soso') { st.rating = 'review'; changed = true; }
+            else if (st.rating === 'known') { st.rating = 'learned'; changed = true; }
+          }
+        }
+      }
+      if (changed) saveAll(all);
+    })();
+
     const getState = (pair) => {
       const all = loadAll(); const dk = deckKey(); const id = cardId(pair);
-      return (all[dk] && all[dk][id]) || { rating:'unknown', last:0 };
+      return (all[dk] && all[dk][id]) || { rating:'review', last:0 }; // default now = 'review'
     };
     const setState = (pair, patch) => {
       const all = loadAll(); const dk = deckKey(); const id = cardId(pair);
@@ -170,9 +184,8 @@
       return cards.reduce((acc, p, i) => {
         const st = getState(p);
         if (mode === 'all') acc.push(i);
-        else if (mode === 'unknown' && st.rating === 'unknown') acc.push(i);
-        else if (mode === 'soso'    && st.rating === 'soso')    acc.push(i);
-        else if (mode === 'known'   && st.rating === 'known')   acc.push(i);
+        else if (mode === 'review'  && st.rating === 'review')  acc.push(i);
+        else if (mode === 'learned' && st.rating === 'learned') acc.push(i);
         return acc;
       }, []);
     }
@@ -242,21 +255,20 @@
 
     resetBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      if (confirm('Clear saved ratings for this Day?')) { resetDeck(); rebuildView(false); }
+      if (confirm('Clear saved progress for this Day?')) { resetDeck(); rebuildView(false); }
     });
 
-    const rate = (outcome) => {
+    const rate = (rating) => {
       const idx = viewIndexes[currentIndex] ?? 0;
       const pair = cards[idx];
-      setState(pair, { rating: outcome, last: Date.now() });
+      setState(pair, { rating, last: Date.now() });
       currentIndex = (currentIndex + 1) % viewIndexes.length;
       renderCurrent();
     };
-    rateUnknownBtn.addEventListener('click', (e)=>{ e.stopPropagation(); rate('unknown'); });
-    rateSoSoBtn.addEventListener('click',    (e)=>{ e.stopPropagation(); rate('soso'); });
-    rateKnownBtn.addEventListener('click',   (e)=>{ e.stopPropagation(); rate('known'); });
+    rateReviewBtn.addEventListener('click',  (e)=>{ e.stopPropagation(); rate('review');  });
+    rateLearnedBtn.addEventListener('click', (e)=>{ e.stopPropagation(); rate('learned'); });
 
-    // 7) Loader (tries TSV first; falls back to CSV)
+    // 7) Loader (TSV first; CSV fallback)
     function parseRows(text) {
       const rows = text.trim().split(/\r?\n/);
       if (rows.length <= 1) return [];
@@ -272,7 +284,6 @@
           const def  = (parts[1] || '').trim();
           if (word && def) out.push([word, def]);
         } else {
-          // CSV fallback: split once on first comma
           const j = line.indexOf(',');
           const word = j >= 0 ? line.slice(0, j).trim() : '';
           const def  = j >= 0 ? line.slice(j + 1).trim() : '';
@@ -283,8 +294,7 @@
     }
 
     function loadCSV(gid) {
-      // Prefer TSV to avoid comma problems in definitions
-      const base = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRKN-660hGCgBRC3GYRHt-_Uq02JB6PJV4s29GIGOs1njgrjAHGGw01lgUFWd1xBQ73e0ZSJzdlb9mi/pub";
+      const base = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSCwWYlYusnhnQlna1pIsMMzbzYd7dETtyI-pXgGrRxOeaor7AEoRX234MFCq1aWCsMXDf3K5U0cRpl/pub";
       const urlTSV = `${base}?gid=${gid}&single=true&output=tsv`;
       const urlCSV = `${base}?gid=${gid}&single=true&output=csv`;
 
