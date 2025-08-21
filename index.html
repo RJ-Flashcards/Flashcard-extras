@@ -194,3 +194,138 @@
         else if (mode === 'soso'    && st.rating === 'soso')    acc.push(i);
         else if (mode === 'known'   && st.rating === 'known')   acc.push(i);
         return acc;
+      }, []);
+    }
+
+    function shuffleArray(arr) {
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
+
+    function rebuildView(preserveCurrent = false) {
+      const mode = modeSelect.value;
+      // Try to remember the current card (if possible)
+      const prevPair = cards[viewIndexes[currentIndex] ?? 0];
+
+      viewIndexes = filteredIndexes(mode);
+      if (viewIndexes.length === 0) viewIndexes = cards.map((_, i) => i);
+      if (shuffleOn) shuffleArray(viewIndexes);
+
+      if (preserveCurrent && prevPair) {
+        const targetId = cardIdFromPair(prevPair);
+        const found = viewIndexes.findIndex(i => cardIdFromPair(cards[i]) === targetId);
+        currentIndex = found >= 0 ? found : 0;
+      } else {
+        currentIndex = 0;
+      }
+      renderCurrent();
+    }
+
+    function renderCurrent() {
+      if (!viewIndexes.length || !cards.length) {
+        front.textContent = "No data available.";
+        back.textContent  = "";
+        cardInner.classList.remove("flipped");
+        return;
+      }
+      const idx = viewIndexes[currentIndex] ?? 0;
+      const pair = cards[idx]; // [word, definition]
+      displayCardFromPair(pair);
+    }
+
+    // Ratings
+    function rate(outcome) {
+      const idx = viewIndexes[currentIndex] ?? 0;
+      const pair = cards[idx];
+      setStateByPair(pair, { rating: outcome, last: Date.now() });
+      // advance automatically to keep flow
+      currentIndex = (currentIndex + 1) % viewIndexes.length;
+      renderCurrent();
+    }
+
+    // Wire new controls (and ensure clicks don’t flip the card)
+    shuffleBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      shuffleOn = !shuffleOn;
+      shuffleBtn.textContent = shuffleOn ? '🔁 Reshuffle' : '🔀 Shuffle';
+      rebuildView(true);
+    });
+
+    modeSelect.addEventListener('change', () => rebuildView(true));
+
+    resetBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (confirm('Clear saved ratings for this Day?')) { resetDeck(); rebuildView(false); }
+    });
+
+    rateUnknownBtn.addEventListener('click', (e)=>{ e.stopPropagation(); rate('unknown'); });
+    rateSoSoBtn.addEventListener('click',    (e)=>{ e.stopPropagation(); rate('soso'); });
+    rateKnownBtn.addEventListener('click',   (e)=>{ e.stopPropagation(); rate('known'); });
+
+    // 4) Next/Prev now use the filtered/shuffled view
+    nextBtn.addEventListener("click", e => {
+      e.stopPropagation();
+      if (!viewIndexes.length) return;
+      currentIndex = (currentIndex + 1) % viewIndexes.length;
+      renderCurrent();
+    });
+    prevBtn.addEventListener("click", e => {
+      e.stopPropagation();
+      if (!viewIndexes.length) return;
+      currentIndex = (currentIndex - 1 + viewIndexes.length) % viewIndexes.length;
+      renderCurrent();
+    });
+
+    // 5) Loader: inject gid, request CSV (kept as you had it)
+    function loadCSV(gid) {
+      const base = "https://docs.google.com/spreadsheets/d/e/2PACX-1vRKN-660hGCgBRC3GYRHt-_Uq02JB6PJV4s29GIGOs1njgrjAHGGw01lgUFWd1xBQ73e0ZSJzdlb9mi/pub";
+      const url  = `${base}?gid=${gid}&single=true&output=csv`;
+
+      fetch(url)
+        .then(res => res.text())
+        .then(csv => {
+          cards = csv
+            .trim()
+            .split("\n")
+            .slice(1)
+            .map(line => {
+              const [word, def] = line.split(",");
+              return (word && def) ? [word.trim(), def.trim()] : null;
+            })
+            .filter(Boolean);
+
+          isFlipped = false;
+          cardInner.classList.remove("flipped");
+
+          // Instead of directly calling displayCard(), rebuild the view
+          // so filters + shuffle + ratings all take effect.
+          rebuildView(false);
+        })
+        .catch(_ => {
+          front.textContent = "Error loading data.";
+          back.textContent  = "";
+          cardInner.classList.remove("flipped");
+          viewIndexes = [];
+        });
+    }
+
+    // 6) Render helper (uses your existing display semantics)
+    function displayCardFromPair(pair) {
+      const [word, definition] = pair || ["", ""];
+      front.textContent = word;
+      back.textContent  = definition;
+      cardInner.classList.toggle("flipped", isFlipped);
+    }
+
+    // 7) Day selector
+    dropdown.addEventListener("change", () => loadCSV(sheetGIDs[dropdown.value]));
+
+    // 8) Initialize on load
+    dropdown.value = "Day 1";
+    loadCSV(sheetGIDs["Day 1"]);
+  </script>
+</body>
+</html>
